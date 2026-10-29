@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Study Hub</title>
+<script src="config.js"></script>
+<style>
+  :root{--bg:#f6f7fb;--card:#fff;--ink:#1c2230;--muted:#6b7385;--brand:#3b5bdb;--line:#e4e7ef}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--ink)}
+  header{background:var(--brand);color:#fff;padding:18px 16px}
+  header h1{font-size:20px;margin:0}
+  header p{margin:4px 0 0;font-size:14px;opacity:.9}
+  main{max-width:720px;margin:0 auto;padding:16px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+  input,select{width:100%;padding:11px;border:1px solid var(--line);border-radius:8px;font-size:16px;margin-bottom:10px;background:#fff;color:var(--ink)}
+  a.btn{display:inline-block;background:var(--brand);color:#fff;text-decoration:none;border-radius:8px;padding:9px 14px;font-size:15px}
+  a.btn.alt{background:#fff;color:var(--brand);border:1px solid var(--brand)}
+  .muted{color:var(--muted);font-size:14px}
+  .tag{display:inline-block;font-size:12px;background:#edf2ff;color:var(--brand);padding:2px 8px;border-radius:99px}
+  .actions{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
+  h2{font-size:16px;margin:0 0 8px}
+  .support{text-align:center;background:#fff4e6;border-color:#ffd8a8}
+  .support img{width:100%;max-width:260px;border-radius:8px;margin:8px auto;display:block}
+  footer{text-align:center;padding:16px;font-size:13px}
+  footer a{color:var(--muted)}
+</style>
+</head>
+<body>
+<header><h1 id="name"></h1><p id="tag"></p></header>
+<main>
+  <div class="card">
+    <input id="q" placeholder="Search…">
+    <select id="subj"><option value="">All subjects</option></select>
+    <div id="list"><p class="muted">Loading…</p></div>
+  </div>
+  <div class="card support">
+    <h2>Support this project</h2>
+    <p class="muted" id="supportText"></p>
+    <img id="qr" alt="UPI QR code" onerror="this.style.display='none'">
+    <p class="muted">UPI ID: <strong id="upi"></strong></p>
+  </div>
+</main>
+<footer><a href="admin.html">Admin</a></footer>
+
+<script>
+const C = window.CONFIG;
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+document.title = C.SITE_NAME;
+$('name').textContent = C.SITE_NAME; $('tag').textContent = C.TAGLINE;
+$('supportText').textContent = C.SUPPORT_TEXT; $('qr').src = C.UPI_QR_IMAGE; $('upi').textContent = C.UPI_ID;
+
+let items = [];
+fetch('resources.json?t=' + Date.now()).then(r => r.json()).then(d => {
+  items = d;
+  const subjects = [...new Set(items.map(i => i.subject).filter(Boolean))].sort();
+  $('subj').innerHTML += subjects.map(s => `<option>${esc(s)}</option>`).join('');
+  draw();
+}).catch(() => { $('list').innerHTML = '<p class="muted">Could not load the list.</p>'; });
+
+function draw(){
+  const q = $('q').value.toLowerCase(), s = $('subj').value;
+  const shown = items.filter(i => (!s || i.subject === s) &&
+    (!q || (i.title + ' ' + (i.description||'') + ' ' + (i.subject||'')).toLowerCase().includes(q)));
+  $('list').innerHTML = shown.length ? shown.map(i => `
+    <div class="card">
+      <strong>${esc(i.title)}</strong>
+      ${i.subject ? `<div><span class="tag">${esc(i.subject)}</span></div>` : ''}
+      ${i.description ? `<p class="muted">${esc(i.description)}</p>` : ''}
+      <div class="actions">
+        <a class="btn" href="${esc(i.file)}" target="_blank" rel="noopener">Open PDF</a>
+        <a class="btn alt" href="${esc(i.file)}" download>Download</a>
+      </div>
+    </div>`).join('') : '<p class="muted">No material yet.</p>';
+}
+$('q').oninput = draw; $('subj').onchange = draw;
+</script>
+</body>
+</html>

@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Admin</title>
+<script src="config.js"></script>
+<style>
+  :root{--bg:#f6f7fb;--card:#fff;--ink:#1c2230;--muted:#6b7385;--brand:#3b5bdb;--line:#e4e7ef}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--ink)}
+  header{background:var(--brand);color:#fff;padding:14px 16px;font-size:18px;font-weight:600}
+  main{max-width:720px;margin:0 auto;padding:16px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+  input,textarea{width:100%;padding:11px;border:1px solid var(--line);border-radius:8px;font-size:16px;margin-bottom:10px;background:#fff;color:var(--ink)}
+  button{background:var(--brand);color:#fff;border:0;border-radius:8px;padding:11px 16px;font-size:16px;width:100%}
+  button.del{background:#fff;color:#c92a2a;border:1px solid #c92a2a;width:auto;padding:7px 12px;font-size:14px}
+  .muted{color:var(--muted);font-size:14px}
+  .msg{padding:10px;border-radius:8px;margin-bottom:10px;font-size:14px}
+  .err{background:#ffe3e3;color:#c92a2a}.ok{background:#d3f9d8;color:#2b8a3e}
+  h2{font-size:16px;margin:0 0 10px}
+  .row{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-top:1px solid var(--line)}
+  a{color:var(--brand)}
+</style>
+</head>
+<body>
+<header>Admin</header>
+<main>
+  <div class="card">
+    <h2>1. Connect to your GitHub</h2>
+    <p class="muted">Needs a fine-grained token for this repo only, with Contents: Read and write. It is saved only on this device.</p>
+    <input id="repo" placeholder="username/repo-name">
+    <input id="token" type="password" placeholder="GitHub token (github_pat_...)">
+    <button id="saveBtn">Save and load list</button>
+  </div>
+
+  <div class="card">
+    <h2>2. Upload a PDF</h2>
+    <div id="msg"></div>
+    <input id="title" placeholder="Title">
+    <input id="subject" placeholder="Subject (e.g. Maths)">
+    <textarea id="desc" rows="2" placeholder="Short description (optional)"></textarea>
+    <input id="file" type="file" accept="application/pdf">
+    <button id="upBtn">Upload</button>
+    <p class="muted">The site updates about a minute after upload. Max 25 MB per file.</p>
+  </div>
+
+  <div class="card">
+    <h2>Current material</h2>
+    <div id="list"><p class="muted">Connect first.</p></div>
+  </div>
+  <p class="muted"><a href="index.html">Back to site</a></p>
+</main>
+
+<script>
+const C = window.CONFIG;
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const store = {
+  get: k => { try { return localStorage.getItem(k) || ''; } catch(e){ return ''; } },
+  set: (k, v) => { try { localStorage.setItem(k, v); } catch(e){} }
+};
+$('repo').value = store.get('repo') || C.REPO;
+$('token').value = store.get('token');
+
+function say(text, kind){ $('msg').className = 'msg ' + kind; $('msg').textContent = text; }
+const repo = () => $('repo').value.trim();
+const gh = (path, opts = {}) => fetch('https://api.github.com/repos/' + repo() + '/contents/' + path, {
+  cache: 'no-store', ...opts,
+  headers: { Authorization: 'Bearer ' + $('token').value.trim(), Accept: 'application/vnd.github+json', 'Content-Type': 'application/json' }
+});
+const enc = s => btoa(unescape(encodeURIComponent(s)));
+const dec = s => decodeURIComponent(escape(atob(s.replace(/\n/g, ''))));
+const fileB64 = f => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result.split(',')[1]); r.onerror = rej; r.readAsDataURL(f); });
+
+async function getList(){
+  const r = await gh('resources.json?ref=' + C.BRANCH);
+  if(r.status === 404) return { list: [], sha: undefined };
+  if(!r.ok) throw new Error(r.status === 401 ? 'Token not accepted.' : 'GitHub error ' + r.status);
+  const j = await r.json();
+  return { list: JSON.parse(dec(j.content) || '[]'), sha: j.sha };
+}
+async function putList(list, sha, message){
+  const r = await gh('resources.json', { method: 'PUT', body: JSON.stringify({ message, branch: C.BRANCH, sha, content: enc(JSON.stringify(list, null, 2) + '\n') }) });
+  if(!r.ok) throw new Error('Could not save list (' + r.status + ').');
+}
+
+async function refresh(){
+  try {
+    const { list } = await getList();
+    $('list').innerHTML = list.length ? list.map(i => `
+      <div class="row"><div><strong>${esc(i.title)}</strong><div class="muted">${esc(i.subject || '')}</div></div>
+      <button class="del" data-id="${esc(i.id)}">Delete</button></div>`).join('') : '<p class="muted">Nothing uploaded yet.</p>';
+    document.querySelectorAll('[data-id]').forEach(b => b.onclick = () => remove(b.dataset.id));
+    say('Connected.', 'ok');
+  } catch(e){ say(e.message, 'err'); }
+}
+
+$('saveBtn').onclick = () => { store.set('repo', repo()); store.set('token', $('token').value.trim()); refresh(); };
+
+$('upBtn').onclick = async () => {
+  const title = $('title').value.trim(), file = $('file').files[0];
+  if(!title || !file) return say('Add a title and choose a PDF.', 'err');
+  if(file.size > 25 * 1024 * 1024) return say('File is over 25 MB.', 'err');
+  $('upBtn').disabled = true; say('Uploading…', 'ok');
+  try {
+    const name = Date.now() + '-' + file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const up = await gh('pdfs/' + name, { method: 'PUT', body: JSON.stringify({ message: 'Add ' + title, branch: C.BRANCH, content: await fileB64(file) }) });
+    if(!up.ok) throw new Error('Upload failed (' + up.status + '). Check the token and repo name.');
+    const { list, sha } = await getList();
+    list.unshift({ id: String(Date.now()), title, subject: $('subject').value.trim(), description: $('desc').value.trim(), file: 'pdfs/' + name, date: new Date().toISOString().slice(0, 10) });
+    await putList(list, sha, 'Update list: ' + title);
+    ['title', 'subject', 'desc', 'file'].forEach(id => $(id).value = '');
+    say('Uploaded. It will show on the site in about a minute.', 'ok');
+    refresh();
+  } catch(e){ say(e.message, 'err'); }
+  $('upBtn').disabled = false;
+};
+
+async function remove(id){
+  try {
+    const { list, sha } = await getList();
+    const item = list.find(i => i.id === id);
+    if(!item || !confirm('Delete "' + item.title + '"?')) return;
+    const f = await gh(item.file + '?ref=' + C.BRANCH);
+    if(f.ok){ const fj = await f.json(); await gh(item.file, { method: 'DELETE', body: JSON.stringify({ message: 'Remove ' + item.title, branch: C.BRANCH, sha: fj.sha }) }); }
+    await putList(list.filter(i => i.id !== id), sha, 'Remove from list: ' + item.title);
+    refresh();
+  } catch(e){ say(e.message, 'err'); }
+}
+
+if($('token').value) refresh();
+</script>
+</body>
+</html>
